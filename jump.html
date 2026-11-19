@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>점프 맵 · 디버깅</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#0d1117;color:#e6edf3;font-family:'Noto Sans KR',sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:20px;text-align:center}
+  .wrap{position:relative;width:min(960px,96vw);aspect-ratio:16/9}
+  canvas{width:100%;height:100%;display:block;border-radius:12px;border:1px solid #30363d;background:#161b22}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    background:rgba(13,17,23,.78);border-radius:12px;cursor:pointer}
+  .overlay b{font-size:clamp(22px,3.4vw,34px);font-weight:900}
+  .overlay span{color:#8b949e;font-size:18px}
+  .done{font-size:clamp(40px,7vw,72px);font-weight:900;color:#3fb950}
+  .help{color:#8b949e;font-size:16px}
+  button{font-family:inherit;font-size:18px;font-weight:700;border:1px solid #30363d;background:transparent;color:#8b949e;
+    border-radius:10px;padding:10px 20px;cursor:pointer}
+  button:hover{color:#e6edf3;border-color:#8b949e}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="c" width="960" height="540"></canvas>
+    <div class="overlay" id="startOv"><b>화면을 클릭하면 시작</b><span>깃발까지 가세요</span></div>
+    <div class="overlay hidden" id="doneOv" style="cursor:default"><div class="done">완료!</div></div>
+  </div>
+  <div class="help">WASD · 방향키 · Space</div>
+  <button id="reset">다시 하기</button>
+
+<script>
+(function(){
+  const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  const W = 960, H = 540;
+
+  // 발판 [x, y, 너비]
+  const PLATS = [
+    [0,   490, 140],
+    [195, 410, 85],
+    [335, 460, 85],
+    [475, 370, 70],
+    [600, 420, 75],
+    [730, 320, 70],
+    [855, 230, 105],
+  ].map(([x,y,w]) => ({x, y, w, h:16}));
+  const GOAL = {x:925, y:180, w:20, h:50};
+  const START = {x:40, y:440};
+
+  const P = {w:42, h:26, squash:0, x:0, y:0, vx:0, vy:0, onGround:false, coyote:0, buffer:0, face:1};
+  const keys = {};
+  let started = false, finished = false;
+
+  const GRAV = 0.6, JUMP = 12.2, SPEED = 4.6, ACC = 0.9, FRICTION = 0.75, MAXFALL = 14;
+
+  function respawn(){ P.landed = 0; P.ground = null; P.x = START.x; P.y = START.y; P.vx = 0; P.vy = 0; P.onGround = false; }
+  respawn();
+
+  // 뒤죽박죽 조작: Space = 앞으로, D/→ = 뒤로, A/← = 점프, W/↑ = 누를 때마다 랜덤
+  const LEFT = ["KeyD","ArrowRight","V_LEFT"], RIGHT = ["Space","V_RIGHT"], UP = ["KeyA","ArrowLeft","V_UP"];
+  const RANDOM_KEYS = ["KeyW","ArrowUp"], randMap = {};
+  const isDown = list => list.some(k => keys[k]);
+
+  addEventListener("keydown", e => {
+    if([...LEFT,...RIGHT,...UP,...RANDOM_KEYS,"ArrowDown","KeyS"].includes(e.code)) e.preventDefault();
+    if(!started){ begin(); }
+    if(RANDOM_KEYS.includes(e.code)){
+      if(!keys[e.code]){
+        const v = ["V_LEFT","V_RIGHT","V_UP"][Math.floor(Math.random()*3)];
+        randMap[e.code] = v; keys[v] = true;
+        if(v === "V_UP") P.buffer = 6;
+      }
+      keys[e.code] = true; return;
+    }
+    if(UP.includes(e.code) && !keys[e.code]) P.buffer = 6;
+    keys[e.code] = true;
+  });
+  addEventListener("keyup", e => {
+    keys[e.code] = false;
+    if(randMap[e.code]){ keys[randMap[e.code]] = false; delete randMap[e.code]; }
+  });
+  addEventListener("blur", () => { for(const k in keys) keys[k] = false; });
+
+  function begin(){ started = true; document.getElementById("startOv").classList.add("hidden"); }
+  document.getElementById("startOv").onclick = begin;
+
+  function step(){
+    if(!started || finished) return;
+    const dir = (isDown(RIGHT)?1:0) - (isDown(LEFT)?1:0);
+    if(dir){ P.vx += dir*ACC; P.vx = Math.max(-SPEED, Math.min(SPEED, P.vx)); P.face = dir; }
+    else { P.vx *= FRICTION; if(Math.abs(P.vx) < .1) P.vx = 0; }
+
+    // 점프 (코요테 타임 + 입력 버퍼)
+    P.coyote = P.onGround ? 6 : Math.max(0, P.coyote-1);
+    if(P.buffer > 0) P.buffer--;
+    if(P.buffer > 0 && P.coyote > 0){ P.vy = -JUMP; P.buffer = 0; P.coyote = 0; P.onGround = false; }
+    if(!isDown(UP) && P.vy < -4) P.vy = -4; // 짧게 누르면 낮게 점프
+
+    P.vy = Math.min(MAXFALL, P.vy + GRAV);
+
+    // 가로 이동 + 충돌
+    P.x += P.vx;
+    P.x = Math.max(0, Math.min(W - P.w, P.x));
+    for(const p of PLATS){
+      if(hit(P,p)){ if(P.vx > 0) P.x = p.x - P.w; else if(P.vx < 0) P.x = p.x + p.w; P.vx = 0; }
+    }
+    // 세로 이동 + 충돌
+    P.y += P.vy; P.onGround = false;
+    for(const p of PLATS){
+      if(hit(P,p)){
+        if(P.vy > 0){ if(P.vy > 3) P.squash = 8; P.y = p.y - P.h; P.onGround = true; P.ground = p; }
+        else if(P.vy < 0){ P.y = p.y + p.h; }
+        P.vy = 0;
+      }
+    }
+    if(P.y < 0){ P.y = 0; if(P.vy < 0) P.vy = 0; }
+    if(P.y > H + 40) respawn();
+
+    if(P.squash > 0) P.squash--;
+    // 마지막 구름에 착지하면 완료 (착지 모션을 잠깐 보여 준 뒤)
+    if(P.onGround && P.ground === PLATS[PLATS.length-1]){ if(++P.landed >= 15) finish(); }
+    else P.landed = 0;
+  }
+  function hit(a,b){ return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
+
+  function finish(){ finished = true; document.getElementById("doneOv").classList.remove("hidden"); }
+
+
+  /* ===== 링링 (겔라티노수스 슬라임) ===== */
+  function rgba(hex, a){ const n = parseInt(hex.slice(1),16); return `rgba(${n>>16},${n>>8&255},${n&255},${a})`; }
+  function lin(x0,y0,x1,y1,stops){ const g = ctx.createLinearGradient(x0,y0,x1,y1); stops.forEach(([o,c]) => g.addColorStop(o,c)); return g; }
+  function softE(x,y,rx,ry,col,a=1,rot=0,hard=0){
+    if(rx<=0||ry<=0) return;
+    ctx.save(); ctx.translate(x,y); ctx.rotate(rot); ctx.scale(1,ry/rx);
+    const g = ctx.createRadialGradient(0,0,rx*hard,0,0,rx);
+    g.addColorStop(0,rgba(col,a)); g.addColorStop(1,rgba(col,0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0,0,rx,0,7); ctx.fill(); ctx.restore();
+  }
+  const PAL = ['#EAF6FF','#BFE0FF','#8DC0F7','#4A6FD0','#2F4FA8'];
+  function bodyPath(w,h,air){
+    const L=-w/2, R=w/2, tx=-w*.07;
+    ctx.beginPath();
+    if(!air){
+      const rc = Math.min(w*.1,h*.3);
+      ctx.moveTo(L+rc,0); ctx.lineTo(R-rc,0);
+      ctx.bezierCurveTo(R-rc*.3,0,R+w*.012,-h*.14,R,-h*.34);
+      ctx.bezierCurveTo(R-w*.02,-h*.78,tx+w*.24,-h,tx,-h);
+      ctx.bezierCurveTo(tx-w*.28,-h,L+w*.015,-h*.74,L,-h*.38);
+      ctx.bezierCurveTo(L-w*.012,-h*.14,L+rc*.3,0,L+rc,0);
+    } else {
+      ctx.moveTo(L+w*.12,-h*.12);
+      ctx.bezierCurveTo(-w*.2,h*.06,w*.2,h*.06,R-w*.1,-h*.1);
+      ctx.bezierCurveTo(R+w*.02,-h*.22,R+w*.01,-h*.5,R-w*.04,-h*.66);
+      ctx.bezierCurveTo(R-w*.1,-h*.92,tx+w*.2,-h,tx,-h);
+      ctx.bezierCurveTo(tx-w*.26,-h,L+w*.01,-h*.82,L,-h*.52);
+      ctx.bezierCurveTo(L-w*.01,-h*.32,L+w*.04,-h*.18,L+w*.12,-h*.12);
+    }
+    ctx.closePath();
+  }
+  function ringring(x,y,w,o={}){
+    const h = w*.56, p = PAL;
+    ctx.save(); ctx.translate(x,y);
+    if(!o.air && !o.noShadow){ softE(0,1,w*.62,h*.16,p[4],.28); }
+    if(o.flip) ctx.scale(-1,1);
+    if(o.sx) ctx.scale(o.sx,o.sy||1);
+    bodyPath(w,h,o.air);
+    const g = ctx.createRadialGradient(-w*.08,-h*.28,w*.04,-w*.02,-h*.45,w*.72);
+    g.addColorStop(0,p[0]); g.addColorStop(.32,p[1]); g.addColorStop(.75,p[2]); g.addColorStop(1,p[2]);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.save(); bodyPath(w,h,o.air); ctx.clip();
+    softE(w*.22,-h*.9,w*.45,h*.35,p[3],.28);
+    softE(-w*.38,-h*.5,w*.2,h*.3,p[2],.35);
+    softE(w*.05,-h*.16,w*.36,h*.17,'#FFFFFF',.55);
+    ctx.lineWidth = w*.09; ctx.strokeStyle = 'rgba(255,255,255,.5)'; bodyPath(w,h,o.air); ctx.stroke();
+    softE(-w*.18,-h*.72,w*.22,h*.16,'#FFFFFF',.95,-.35,.35);
+    ctx.restore();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.save(); ctx.translate(-w*.25,-h*.72); ctx.rotate(-.55); ctx.beginPath(); ctx.ellipse(0,0,w*.075,h*.05,0,0,7); ctx.fill(); ctx.restore();
+    ctx.beginPath(); ctx.arc(w*.3,-h*.62,w*.026,0,7); ctx.fill();
+    bodyPath(w,h,o.air);
+    ctx.lineWidth = Math.max(1.4,w/30); ctx.lineJoin = 'round';
+    ctx.strokeStyle = lin(0,-h,0,0,[[0,p[3]],[1,p[4]]]); ctx.stroke();
+    if(o.flip) ctx.scale(-1,1);
+    // 얼굴
+    const ey=-h*.47, ex=w*.17, er=Math.max(1.4,w*.032), ink='#1F2A55';
+    for(const s of [-1,1]){
+      ctx.fillStyle = lin(0,ey-er,0,ey+er,[[0,'#2B3A75'],[1,ink]]); ctx.beginPath(); ctx.arc(s*ex,ey,er,0,7); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s*ex-er*.32,ey-er*.36,er*.34,0,7); ctx.fill();
+    }
+    const my=ey+er*2.4, m=er*.9;
+    ctx.strokeStyle = p[4]; ctx.lineWidth = Math.max(1.2,er*.6); ctx.lineCap = 'round';
+    if(o.air){ ctx.fillStyle = p[4]; ctx.beginPath(); ctx.ellipse(0,my+m*.3,m,m*1.3,0,0,7); ctx.fill(); }
+    else { ctx.beginPath(); ctx.moveTo(-m*2,my-m*.25); ctx.quadraticCurveTo(-m*1.4,my+m*1.1,0,my); ctx.quadraticCurveTo(m*1.4,my+m*1.1,m*2,my-m*.25); ctx.stroke(); }
+    ctx.restore();
+  }
+
+
+  /* ===== 구름 발판 ===== */
+  function cloud(p){
+    const {x, y, w} = p, cy = y + 11, bumps = Math.max(3, Math.round(w / 22));
+    const shape = () => {
+      ctx.beginPath();
+      // 몸통
+      ctx.ellipse(x + w/2, cy + 2, w/2 + 6, 11, 0, 0, 7);
+      // 위쪽 몽글몽글
+      for(let i = 0; i < bumps; i++){
+        const bx = x + (i + .5) * w / bumps, r = 9 + ((i * 7 + Math.floor(x)) % 3) * 1.5;
+        ctx.moveTo(bx + r, cy - 1); ctx.arc(bx, cy - 1, r, 0, 7);
+      }
+      // 양끝
+      ctx.moveTo(x + 4, cy + 3); ctx.arc(x - 2, cy + 3, 8, 0, 7);
+      ctx.moveTo(x + w + 10, cy + 3); ctx.arc(x + w + 2, cy + 3, 8, 0, 7);
+    };
+    softE(x + w/2, cy + 18, w/2 + 10, 7, '#8DC0F7', .25);
+    ctx.save();
+    shape(); ctx.fillStyle = lin(0, y - 10, 0, cy + 14, [[0, '#FFFFFF'], [.6, '#F1F6FF'], [1, '#C9DBFA']]); ctx.fill();
+    ctx.clip();
+    softE(x + w*.35, y - 2, w*.35, 5, '#FFFFFF', .95);
+    softE(x + w/2, cy + 12, w/2 + 6, 6, '#A9C4F2', .5);
+    ctx.restore();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // 발판
+    // 플레이어: 링링
+    const air = !P.onGround;
+    const sq = P.squash > 0 ? 1 + P.squash*.04 : 1;
+    ringring(P.x + P.w/2, P.y + P.h + 7, P.w + 8, {air, noShadow:true, flip: P.face < 0, sx: sq, sy: 1/sq});
+    for(const p of PLATS) cloud(p);
+    // 깃발: 레이싱 체크기
+    {
+      const px = GOAL.x, top = GOAL.y - 6, cols = 6, rows = 4, cw = 7, ch = 6, now = performance.now()/1000;
+      // 깃대
+      ctx.fillStyle = lin(px-2, 0, px+4, 0, [[0,'#F2F4F8'],[1,'#9AA3B5']]);
+      ctx.fillRect(px, top, 4, GOAL.y + GOAL.h - top + 6);
+      ctx.fillStyle = '#E3B341'; ctx.beginPath(); ctx.arc(px+2, top-2, 4, 0, 7); ctx.fill();
+      // 펄럭이는 체크무늬 (깃대에서 왼쪽으로)
+      for(let c = 0; c < cols; c++){
+        const k = (c+1)/cols, x0 = px - (c+1)*cw;
+        const wave = Math.sin(now*6 - c*.9) * 2.2 * k, wave2 = Math.sin(now*6 - (c+1)*.9) * 2.2 * k;
+        for(let r = 0; r < rows; r++){
+          ctx.fillStyle = (r + c) % 2 ? '#111111' : '#FFFFFF';
+          ctx.beginPath();
+          ctx.moveTo(x0 + cw, top + 2 + r*ch + wave);
+          ctx.lineTo(x0 + cw, top + 2 + (r+1)*ch + wave + .4);
+          ctx.lineTo(x0 - .4, top + 2 + (r+1)*ch + wave2 + .4);
+          ctx.lineTo(x0 - .4, top + 2 + r*ch + wave2);
+          ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+  }
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  // 고정 60fps 업데이트 (모니터 주사율과 상관없이 같은 속도)
+  let last = performance.now(), acc = 0; const DT = 1000/60;
+  function loop(now){
+    acc += Math.min(100, now - last); last = now;
+    while(acc >= DT){ step(); acc -= DT; }
+    draw(); requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  document.getElementById("reset").onclick = e => {
+    e.currentTarget.blur();
+    finished = false; respawn();
+    document.getElementById("doneOv").classList.add("hidden");
+  };
+})();
+</script>
+<a href="index.html" style="position:fixed;top:14px;left:16px;z-index:50;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;font-weight:700;color:#8b949e;text-decoration:none;padding:6px 10px;border-radius:8px" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">← 디버깅</a>
+</body>
+</html>

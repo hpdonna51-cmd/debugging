@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다른 색깔 찾기 · 디버깅</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@800&family=Noto+Sans+KR:wght@500;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#0d1117;color:#e6edf3;font-family:'Noto Sans KR',sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px;text-align:center}
+  .label{color:#8b949e;font-size:18px}
+  .step{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:800;color:#58a6ff;margin-top:6px}
+  .grid{display:grid;gap:8px;width:min(480px,86vw,62vh);aspect-ratio:1}
+  .cell{border:none;border-radius:10px;cursor:pointer;padding:0;transition:transform .08s}
+  .cell:hover{transform:scale(.96)}
+  .shake{animation:s .25s}
+  @keyframes s{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+  .msg{color:#8b949e;font-size:18px;min-height:28px}
+  .done{font-size:clamp(40px,7vw,72px);font-weight:900;color:#3fb950}
+  button.reset{font-family:inherit;font-size:18px;font-weight:700;border:1px solid #30363d;background:transparent;color:#8b949e;
+    border-radius:10px;padding:10px 20px;cursor:pointer}
+  button.reset:hover{color:#e6edf3;border-color:#8b949e}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+  <div id="head">
+    <div class="label">색이 다른 칸 하나를 찾으세요</div>
+    <div class="step" id="step">1 / 4</div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="msg" id="msg"></div>
+  <div id="done" class="done hidden">완료!</div>
+  <button class="reset" id="reset">다시 하기</button>
+
+<script>
+(function(){
+  // 단계별 난이도: 칸 수(n x n)와 밝기 차이(%)
+  const LEVELS = [ {n:5, diff:18}, {n:5, diff:10}, {n:5, diff:6}, {n:5, diff:4} ];
+  let level = 0, answer = -1;
+  const $ = id => document.getElementById(id);
+
+  function build(){
+    const {n, diff} = LEVELS[level];
+    const h = Math.floor(Math.random()*360);
+    const s = 55 + Math.floor(Math.random()*20);
+    const l = 42 + Math.floor(Math.random()*14);
+    const l2 = Math.random() < .5 ? l + diff : l - diff;
+    answer = Math.floor(Math.random()*n*n);
+    const g = $("grid");
+    g.style.gridTemplateColumns = `repeat(${n},1fr)`;
+    g.style.gap = n >= 7 ? "5px" : "8px";
+    g.innerHTML = "";
+    for(let i=0;i<n*n;i++){
+      const b = document.createElement("button");
+      b.className = "cell";
+      b.style.background = `hsl(${h},${s}%,${i===answer ? l2 : l}%)`;
+      b.onclick = () => pick(i);
+      g.appendChild(b);
+    }
+    $("step").textContent = `${level+1} / ${LEVELS.length}`;
+  }
+  function pick(i){
+    if(i === answer){
+      level++;
+      if(level >= LEVELS.length){
+        $("grid").classList.add("hidden"); $("head").classList.add("hidden");
+        $("msg").textContent = ""; $("done").classList.remove("hidden");
+      } else { $("msg").textContent = "정답! 더 어려워집니다"; build(); }
+    } else {
+      const g = $("grid"); g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake");
+      $("msg").textContent = "아니에요, 다시 찾아보세요";
+    }
+  }
+  $("reset").onclick = () => {
+    level = 0; $("msg").textContent = "";
+    $("grid").classList.remove("hidden"); $("head").classList.remove("hidden"); $("done").classList.add("hidden");
+    build();
+  };
+  build();
+})();
+</script>
+<a href="index.html" style="position:fixed;top:14px;left:16px;z-index:50;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;font-weight:700;color:#8b949e;text-decoration:none;padding:6px 10px;border-radius:8px" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">← 디버깅</a>
+</body>
+</html>

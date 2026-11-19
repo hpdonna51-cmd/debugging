@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>고장 난 키보드 · 디버깅</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;800&family=Noto+Sans+KR:wght@500;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#0d1117;color:#e6edf3;font-family:'Noto Sans KR',sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px;text-align:center}
+  h1{margin:0;font-size:clamp(26px,4vw,40px);font-weight:900}
+  .label{color:#8b949e;font-size:18px}
+  .target{font-family:'JetBrains Mono',monospace;font-size:clamp(44px,8vw,84px);font-weight:800;letter-spacing:8px}
+  .target span{color:#6e7681}
+  .target span.ok{color:#3fb950}
+  .target span.bad{color:#f85149;text-decoration:underline}
+  .target span.cur{color:#e6edf3;border-bottom:5px solid #58a6ff}
+  .box{min-width:min(560px,90vw);min-height:100px;border:2px dashed #30363d;border-radius:14px;background:#161b22;
+    display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;
+    font-size:clamp(36px,6vw,60px);font-weight:800;letter-spacing:8px;padding:10px 20px}
+  .caret{display:inline-block;width:4px;height:1em;background:#58a6ff;margin-left:4px;animation:b 1s steps(1) infinite}
+  @keyframes b{50%{opacity:0}}
+  .shake{animation:s .25s}
+  @keyframes s{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+  .msg{color:#8b949e;font-size:18px;min-height:28px}
+  .done{font-size:clamp(40px,7vw,72px);font-weight:900;color:#3fb950}
+  button{font-family:inherit;font-size:18px;font-weight:700;border:1px solid #30363d;background:transparent;color:#8b949e;
+    border-radius:10px;padding:10px 20px;cursor:pointer}
+  button:hover{color:#e6edf3;border-color:#8b949e}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+  <div>
+    <div class="label">아래 단어를 입력하세요</div>
+    <div class="target" id="target"></div>
+  </div>
+  <div class="box" id="box"><span id="typed"></span><span class="caret" id="caret"></span></div>
+  <div class="msg" id="msg">아무 키나 눌러 보세요… (틀리면 Backspace)</div>
+  <div id="done" class="hidden">
+    <div class="done">완료!</div>
+  </div>
+  <button id="reset">다시 하기</button>
+
+<script>
+(function(){
+  const WORD = "HYUNDAI", SHIFT = 2, A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let typed = "", finished = false;
+  const $ = id => document.getElementById(id);
+
+  function render(){
+    let h = "";
+    for(let i=0;i<WORD.length;i++){
+      let c = "";
+      if(i < typed.length) c = typed[i]===WORD[i] ? "ok" : "bad";
+      else if(i === typed.length && !finished) c = "cur";
+      h += `<span class="${c}">${WORD[i]}</span>`;
+    }
+    $("target").innerHTML = h;
+    $("typed").textContent = typed;
+  }
+  function shake(){ const b=$("box"); b.classList.remove("shake"); void b.offsetWidth; b.classList.add("shake"); }
+
+  document.addEventListener("keydown", e=>{
+    if(finished || e.ctrlKey || e.metaKey || e.altKey) return;
+    if(e.code === "Backspace"){ e.preventDefault(); typed = typed.slice(0,-1); $("msg").textContent=""; render(); return; }
+    if(!/^Key[A-Z]$/.test(e.code)) return;
+    e.preventDefault();
+    if(typed.length >= WORD.length){ shake(); return; }
+    const ch = A[(A.indexOf(e.code.slice(3)) + SHIFT) % 26];
+    typed += ch;
+    const i = typed.length - 1;
+    if(typed[i] !== WORD[i]) shake();
+    render();
+    if(typed === WORD){
+      finished = true; render();
+      $("caret").classList.add("hidden"); $("msg").classList.add("hidden"); $("done").classList.remove("hidden");
+    }
+  });
+
+  $("reset").onclick = ()=>{
+    typed = ""; finished = false;
+    $("caret").classList.remove("hidden"); $("msg").classList.remove("hidden"); $("done").classList.add("hidden");
+    $("msg").textContent = "아무 키나 눌러 보세요… (틀리면 Backspace)";
+    $("reset").blur(); render();
+  };
+  render();
+})();
+</script>
+<a href="index.html" style="position:fixed;top:14px;left:16px;z-index:50;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;font-weight:700;color:#8b949e;text-decoration:none;padding:6px 10px;border-radius:8px" onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">← 디버깅</a>
+</body>
+</html>
