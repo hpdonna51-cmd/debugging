@@ -333,5 +333,17 @@
 })();
 </script>
 <a href="index.html" style="position:fixed;top:14px;left:16px;z-index:50;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;font-weight:700;color:#e2c48c;text-decoration:none;padding:6px 10px;border-radius:8px" onmouseover="this.style.color='#fff3cf'" onmouseout="this.style.color='#e2c48c'">← 디버깅</a>
+<script>/* fit-to-screen */
+(function(){
+  var DW=1300, DH=880, MAX=2.6;
+  function fit(){
+    var z=Math.min(innerWidth/DW, innerHeight/DH, MAX);
+    z=Math.max(1, z);
+    document.body.style.zoom=z;
+    document.body.style.minHeight=(innerHeight/z)+'px';
+  }
+  addEventListener('resize', fit); fit();
+})();
+</script>
 </body>
 </html>
